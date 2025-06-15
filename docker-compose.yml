@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # Frontend service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claraverse-frontend
+    ports:
+      - "8069:8069"
+    environment:
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - claraverse-network
+
+  # Python backend service
+  backend:
+    build:
+      context: ./py_backend
+      dockerfile: Dockerfile
+    container_name: claraverse-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=5000
+    volumes:
+      - backend-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - claraverse-network
+
+  # N8N service (optional - comment out if not needed)
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: claraverse-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-admin}
+      - N8N_HOST=0.0.0.0
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    restart: unless-stopped
+    networks:
+      - claraverse-network
+
+  # ComfyUI service (optional - comment out if not needed)
+  comfyui:
+    image: comfyanonymous/comfyui:latest
+    container_name: claraverse-comfyui
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui-data:/workspace
+      - ./models:/workspace/ComfyUI/models
+      - ./outputs:/workspace/ComfyUI/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - claraverse-network
+
+  # Nginx reverse proxy (for production)
+  nginx:
+    image: nginx:alpine
+    container_name: claraverse-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-prod.conf:/etc/nginx/conf.d/default.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    networks:
+      - claraverse-network
+
+volumes:
+  backend-data:
+  n8n-data:
+  comfyui-data:
+
+networks:
+  claraverse-network:
+    driver: bridge
